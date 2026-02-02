@@ -105,24 +105,19 @@ ctx = webrtc_streamer(
 )
 
 # ---------------- UI CONTROLS ----------------
-# ---------------- CHAT HISTORY ----------------
-if "chat" not in st.session_state:
-    st.session_state.chat = []
-
-# ---------------- UI CONTROLS ----------------
 if ctx.audio_processor:
 
-    if st.button("▶️ Start Talking"):
+    if st.button("🎙️ Start Speaking (5 sec)"):
         ctx.audio_processor.frames = []
         ctx.audio_processor.recording = True
-        st.info("🎧 Listening… speak now")
+        st.info("Speak clearly in English...")
         time.sleep(5)
         ctx.audio_processor.recording = False
+        st.success("Recording done")
 
-        st.warning("🧠 Thinking…")
-
+    if st.button("🧠 Ask"):
         if len(ctx.audio_processor.frames) == 0:
-            st.error("No audio captured")
+            st.error("No audio recorded")
         else:
             # Merge frames
             audio_np = np.concatenate(ctx.audio_processor.frames, axis=1)
@@ -134,11 +129,11 @@ if ctx.audio_processor:
             # Normalize
             audio_np = audio_np / np.max(np.abs(audio_np))
 
-            # Resample
+            # Resample 48k → 16k
             audio_16k = signal.resample_poly(audio_np, 16000, 48000)
             audio_16k = (audio_16k * 32767).astype(np.int16)
 
-            # Write WAV
+            # Write proper WAV
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
                 wav_path = f.name
 
@@ -148,43 +143,29 @@ if ctx.audio_processor:
                 wf.setframerate(16000)
                 wf.writeframes(audio_16k.tobytes())
 
-            # -------- SPEECH TO TEXT --------
+            # -------- GROQ SPEECH TO TEXT --------
             with open(wav_path, "rb") as audio_file:
                 transcript = groq_client.audio.transcriptions.create(
                     file=audio_file,
-                    model="whisper-large-v3-turbo",
+                    model="whisper-large-v3",
                     language="en",
                     temperature=0.0
                 )
 
             user_text = transcript.text
-            st.success(f"🗣️ You: {user_text}")
+            st.success(f"You said: {user_text}")
 
-            # -------- LLM ANSWER --------
-            completion = groq_client.chat.completions.create(
-                model="llama-3.1-8b-instant",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": SYSTEM_PROMPT
-                    },
-                    {"role": "user", "content": user_text}
-                ],
-                temperature=0.5
+            # -------- BACKEND CALL --------
+            response = requests.post(
+                "https://voice-bot-using-groq-model-2.onrender.com/ask",
+                json={"question": user_text}
             )
 
-            answer = completion.choices[0].message.content
-
-            # Save chat
-            st.session_state.chat.append((user_text, answer))
-
-            st.success("🤖 Assistant:")
+            answer = response.json()["answer"]
+            st.markdown("### 🤖 Anamika Says")
             st.write(answer)
 
-            # -------- VOICE REPLY --------
+            # -------- TEXT TO SPEECH --------
             tts = gTTS(answer, lang="en")
             tts.save("reply.mp3")
             st.audio("reply.mp3")
-
-# ---------------- SHOW CHAT HISTORY ----------------
-
